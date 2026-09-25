@@ -1,0 +1,6 @@
+{
+  "name": "StaffPulse Attendance & Leave Hub",
+  "description": "Comprehensive staff clock-in/out attendance tracking, offer letter leave quota management, and supervisor approval workflow.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
