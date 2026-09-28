@@ -1,4 +1,5 @@
 node_modules/
+.npm-cache/
 build/
 dist/
 coverage/
@@ -6,3 +7,6 @@ coverage/
 *.log
 .env*
 !.env.example
+kth-pulse.zip
+src/data/mockData.ts
+src/components/AddEmployeeModal.tsx
