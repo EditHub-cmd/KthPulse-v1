@@ -45,13 +45,13 @@ export async function loadAttendance(): Promise<AttendanceRecord[]> {
 }
 
 export async function loadLeaveRequests(): Promise<LeaveRequest[]> {
-  const { data, error } = await supabase.from('leave_requests').select('*, profiles(name, department)').order('applied_at', { ascending: false });
+  const { data, error } = await supabase.from('leave_requests').select('*, employee:profiles!leave_requests_employee_id_fkey(name, department)').order('applied_at', { ascending: false });
   throwIfError(error);
   return (data || []).map((row) => ({
     id: row.id,
     employeeId: row.employee_id,
-    employeeName: row.profiles?.name || '',
-    employeeDepartment: row.profiles?.department || '',
+    employeeName: row.employee?.name || '',
+    employeeDepartment: row.employee?.department || '',
     leaveType: row.leave_type,
     startDate: row.start_date,
     endDate: row.end_date,
