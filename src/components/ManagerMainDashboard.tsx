@@ -155,7 +155,7 @@ export const ManagerMainDashboard: React.FC<ManagerMainDashboardProps> = ({
               Staff Clock-In Status & Computer Activity (Today)
             </h3>
             <p className="text-xs text-slate-500">
-              Click on any staff member's name (e.g. <strong>John Doe</strong>) to view their dedicated Month & Year calendar
+              Click on a staff member's name to view their dedicated Month & Year calendar
             </p>
           </div>
           <span className="text-xs font-mono text-slate-500 tabular-nums">

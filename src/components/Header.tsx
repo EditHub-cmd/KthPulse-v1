@@ -1,11 +1,9 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Employee, LeaveRequest } from '../types';
 import { 
   Clock, 
   CalendarDays, 
   ShieldCheck, 
-  RotateCcw, 
-  ChevronDown,
   LogOut,
   LayoutDashboard,
   Calendar,
@@ -15,28 +13,21 @@ import {
 
 interface HeaderProps {
   currentEmployee: Employee;
-  allEmployees: Employee[];
   pendingRequestsCount: number;
   activeView: 'manager_dashboard' | 'staff_calendar' | 'leave_management' | 'staff_clock' | 'staff_leave' | 'attendance_audit';
   setActiveView: (view: 'manager_dashboard' | 'staff_calendar' | 'leave_management' | 'staff_clock' | 'staff_leave' | 'attendance_audit') => void;
-  onSwitchUser: (employeeId: string) => void;
-  onResetData: () => void;
   onRequestLeaveOpen: () => void;
   onLogout: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentEmployee,
-  allEmployees,
   pendingRequestsCount,
   activeView,
   setActiveView,
-  onSwitchUser,
-  onResetData,
   onRequestLeaveOpen,
   onLogout,
 }) => {
-  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const isManager = currentEmployee.role === 'manager';
 
   return (
@@ -167,117 +158,11 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* User Account Switcher Dropdown */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-                className="flex items-center gap-2 p-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors text-left cursor-pointer"
-              >
-                <img
-                  src={currentEmployee.avatar}
-                  alt={currentEmployee.name}
-                  referrerPolicy="no-referrer"
-                  className="w-8 h-8 rounded-full object-cover border border-slate-200"
-                />
-                <div className="hidden lg:block text-xs">
-                  <div className="font-semibold text-slate-800 flex items-center gap-1">
-                    {currentEmployee.name}
-                    {isManager && (
-                      <span className="text-[9px] bg-indigo-100 text-indigo-800 px-1 rounded font-medium">
-                        Manager
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-slate-400 text-[10px] truncate max-w-[120px]">
-                    {currentEmployee.email}
-                  </div>
-                </div>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-              </button>
-
-              {userDropdownOpen && (
-                <div
-                  className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl border border-slate-200 py-2 z-50 animate-in fade-in zoom-in-95 duration-100"
-                  onClick={() => setUserDropdownOpen(false)}
-                >
-                  <div className="px-3.5 py-2 border-b border-slate-100 text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
-                    Switch Active User Account
-                  </div>
-
-                  <div className="max-h-64 overflow-y-auto py-1">
-                    {allEmployees.map((emp) => (
-                      <button
-                        key={emp.id}
-                        type="button"
-                        onClick={() => onSwitchUser(emp.id)}
-                        className={`w-full px-3.5 py-2 text-left flex items-center gap-2.5 hover:bg-slate-50 transition-colors cursor-pointer ${
-                          emp.id === currentEmployee.id ? 'bg-indigo-50/70' : ''
-                        }`}
-                      >
-                        <img
-                          src={emp.avatar}
-                          alt={emp.name}
-                          referrerPolicy="no-referrer"
-                          className="w-7 h-7 rounded-full object-cover border border-slate-200 shrink-0"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-xs font-semibold text-slate-800 flex items-center justify-between">
-                            <span className="truncate">{emp.name}</span>
-                            {emp.role === 'manager' && (
-                              <span className="text-[9px] text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-1">
-                                Manager
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-slate-400 truncate">
-                            {emp.title} · {emp.locationCountry || 'Remote'}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="border-t border-slate-100 mt-1 pt-1 px-3 space-y-1">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setUserDropdownOpen(false);
-                        onResetData();
-                      }}
-                      className="w-full py-1 text-xs text-slate-600 hover:text-rose-600 flex items-center gap-2 transition-colors cursor-pointer"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      <span>Reset Sample Data</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setUserDropdownOpen(false);
-                        onLogout();
-                      }}
-                      className="w-full py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg flex items-center gap-2 font-medium transition-colors cursor-pointer"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />
-                      <span>Log Out</span>
-                    </button>
-                  </div>
-                </div>
-              )}
+            <div className="hidden sm:flex items-center gap-2 text-xs text-slate-600">
+              <img src={currentEmployee.avatar} alt="" className="w-8 h-8 rounded-full object-cover border border-slate-200" />
+              <div><div className="font-semibold">{currentEmployee.name}{isManager ? ' · Manager' : ''}</div><div className="text-[10px] text-slate-400">{currentEmployee.email}</div></div>
             </div>
-
-            {/* Dedicated Logout Button */}
-            <button
-              type="button"
-              onClick={onLogout}
-              className="p-2 text-slate-400 hover:text-rose-600 hover:bg-slate-50 rounded-xl transition-colors cursor-pointer"
-              title="Log out of StaffPulse"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
+            <button type="button" onClick={onLogout} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-slate-50 rounded-xl transition-colors" title="Log out of StaffPulse"><LogOut className="w-4 h-4" /></button>
           </div>
         </div>
       </div>

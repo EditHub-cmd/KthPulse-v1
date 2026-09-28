@@ -5,10 +5,8 @@ import {
   Calendar, 
   AlertTriangle, 
   CheckCircle2, 
-  FileText, 
   Clock, 
-  Info,
-  Paperclip
+  Info
 } from 'lucide-react';
 import { computeEmployeeLeaveBalances } from '../utils/storage';
 import { calculateWorkingDays, getTodayDateString } from '../utils/dateUtils';
@@ -42,7 +40,6 @@ export const LeaveRequestModal: React.FC<LeaveRequestModalProps> = ({
   const [isHalfDay, setIsHalfDay] = useState(false);
   const [halfDayPeriod, setHalfDayPeriod] = useState<'morning' | 'afternoon'>('morning');
   const [reason, setReason] = useState('');
-  const [docName, setDocName] = useState<string>('');
 
   // Calculate working days requested
   const requestedDays = useMemo(() => {
@@ -77,7 +74,6 @@ export const LeaveRequestModal: React.FC<LeaveRequestModalProps> = ({
       halfDayPeriod: isHalfDay ? halfDayPeriod : undefined,
       totalDays: requestedDays,
       reason: reason.trim(),
-      supportingDocName: docName || undefined,
     });
 
     onClose();
@@ -314,43 +310,6 @@ export const LeaveRequestModal: React.FC<LeaveRequestModalProps> = ({
                   {r}
                 </button>
               ))}
-            </div>
-          </div>
-
-          {/* Supporting Document / Medical Certificate Simulator */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Supporting Documentation (Optional)
-            </label>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  const demoDocs = [
-                    'Medical_Certificate_Clinic.pdf',
-                    'Flight_Itinerary.pdf',
-                    'Hospital_Discharge_Form.pdf',
-                  ];
-                  setDocName(demoDocs[Math.floor(Math.random() * demoDocs.length)]);
-                }}
-                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <Paperclip className="w-3.5 h-3.5" />
-                <span>{docName ? 'Change Attachment' : 'Attach Medical Cert / Document'}</span>
-              </button>
-              {docName && (
-                <div className="flex items-center gap-1.5 text-xs text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-200">
-                  <FileText className="w-3.5 h-3.5" />
-                  <span className="font-mono truncate max-w-[180px]">{docName}</span>
-                  <button
-                    type="button"
-                    onClick={() => setDocName('')}
-                    className="text-slate-400 hover:text-rose-600 ml-1 cursor-pointer"
-                  >
-                    ×
-                  </button>
-                </div>
-              )}
             </div>
           </div>
 
