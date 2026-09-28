@@ -1,20 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Employee, 
   AttendanceRecord, 
   LeaveRequest, 
-  GeoLocationData, 
-  UserRole 
+  GeoLocationData
 } from './types';
 import { 
   loadEmployees, 
-  saveEmployees, 
   loadAttendance, 
-  saveAttendance, 
   loadLeaveRequests, 
-  saveLeaveRequests, 
-  getActiveUserId, 
-  setActiveUserId, 
   clockIn, 
   clockOut, 
   startBreak, 
@@ -22,10 +16,9 @@ import {
   submitLeaveRequest, 
   reviewLeaveRequest, 
   cancelLeaveRequest, 
-  updateOfferLetterContract, 
-  resetDemoData, 
   getTodayAttendanceForEmployee 
 } from './utils/storage';
+import { supabase } from './lib/supabase';
 import { Header } from './components/Header';
 import { LoginView } from './components/LoginView';
 import { ManagerMainDashboard } from './components/ManagerMainDashboard';
@@ -38,18 +31,17 @@ import { StaffAttendanceHistory } from './components/StaffAttendanceHistory';
 import { ManagerLeaveDashboard } from './components/ManagerLeaveDashboard';
 import { ManagerAttendanceHistory } from './components/ManagerAttendanceHistory';
 import { LeaveRequestModal } from './components/LeaveRequestModal';
-import { AddEmployeeModal } from './components/AddEmployeeModal';
 
 export default function App() {
-  const [employees, setEmployees] = useState<Employee[]>(() => loadEmployees());
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => loadAttendance());
-  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>(() => loadLeaveRequests());
-  const [currentUserId, setCurrentUserId] = useState<string>(() => getActiveUserId());
-  
-  // Auth state
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<LeaveRequest[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [appError, setAppError] = useState('');
 
-  // Selected staff member for dedicated Calendar View (e.g. John Doe)
+  // Staff member selected by the manager for calendar review.
   const [selectedStaffForCalendar, setSelectedStaffForCalendar] = useState<Employee | null>(null);
 
   // View state
@@ -59,11 +51,64 @@ export default function App() {
 
   // Modals
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
-  const [isAddEmployeeModalOpen, setIsAddEmployeeModalOpen] = useState(false);
-
   // Active current user
-  const currentEmployee = employees.find((e) => e.id === currentUserId) || employees[0];
+  const currentEmployee = employees.find((e) => e.id === currentUserId);
   const isManager = currentEmployee?.role === 'manager';
+
+  const loadUserData = useCallback(async (userId: string) => {
+    setIsLoading(true);
+    setAppError('');
+    try {
+      const [nextEmployees, nextAttendance, nextLeaveRequests] = await Promise.all([
+        loadEmployees(), loadAttendance(), loadLeaveRequests(),
+      ]);
+      if (!nextEmployees.some((employee) => employee.id === userId)) {
+        throw new Error('Your login is valid, but your staff profile is missing. Ask the manager to check Supabase setup.');
+      }
+      setEmployees(nextEmployees);
+      setAttendance(nextAttendance);
+      setLeaveRequests(nextLeaveRequests);
+      setCurrentUserId(userId);
+      setIsAuthenticated(true);
+      const signedInEmployee = nextEmployees.find((employee) => employee.id === userId);
+      setActiveView(signedInEmployee?.role === 'manager' ? 'manager_dashboard' : 'staff_clock');
+    } catch (error) {
+      setAppError(error instanceof Error ? error.message : 'Could not load your staff data.');
+      setIsAuthenticated(false);
+      setCurrentUserId(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!mounted) return;
+      if (event === 'SIGNED_OUT' || !session) {
+        setIsAuthenticated(false);
+        setCurrentUserId(null);
+        setEmployees([]);
+        setAttendance([]);
+        setLeaveRequests([]);
+        setIsLoading(false);
+      } else if (event === 'SIGNED_IN') {
+        window.setTimeout(() => { if (mounted) void loadUserData(session.user.id); }, 0);
+      }
+    });
+    void supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return;
+      if (error) {
+        setAppError(error.message);
+        setIsLoading(false);
+      } else if (data.session) {
+        void loadUserData(data.session.user.id);
+      } else {
+        setIsLoading(false);
+      }
+    });
+    return () => { mounted = false; subscription.unsubscribe(); };
+  }, [loadUserData]);
 
   // Synchronize view when switching between staff and manager
   useEffect(() => {
@@ -84,33 +129,14 @@ export default function App() {
     setActiveView('staff_calendar');
   };
 
-  // Switch active user
-  const handleSwitchUser = (employeeId: string) => {
-    setCurrentUserId(employeeId);
-    setActiveUserId(employeeId);
-    const user = employees.find((e) => e.id === employeeId);
-    if (user?.role === 'manager') {
-      setActiveView('manager_dashboard');
-    } else {
-      setActiveView('staff_clock');
-    }
+  const handleLoginSuccess = () => {
+    setIsLoading(true);
+    setAppError('');
   };
 
-  // Login handler
-  const handleLoginSuccess = (emp: Employee) => {
-    setCurrentUserId(emp.id);
-    setActiveUserId(emp.id);
-    setIsAuthenticated(true);
-    if (emp.role === 'manager') {
-      setActiveView('manager_dashboard');
-    } else {
-      setActiveView('staff_clock');
-    }
-  };
-
-  // Logout handler
-  const handleLogout = () => {
-    setIsAuthenticated(false);
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) setAppError(error.message);
   };
 
   // Clock In handler with GPS and 10:00 AM late evaluation
@@ -119,31 +145,26 @@ export default function App() {
     note: string,
     geo?: GeoLocationData
   ) => {
-    const updated = clockIn(currentEmployee.id, location, note, attendance, geo);
-    setAttendance(updated);
+    void clockIn(currentEmployee!.id, location, note, attendance, geo).then(setAttendance).catch((error) => setAppError(error.message));
   };
 
   // Break handlers
   const handleStartBreak = (attendanceId: string, note: string) => {
-    const updated = startBreak(attendanceId, note, attendance);
-    setAttendance(updated);
+    void startBreak(attendanceId, note, attendance).then(setAttendance).catch((error) => setAppError(error.message));
   };
 
   const handleEndBreak = (attendanceId: string) => {
-    const updated = endBreak(attendanceId, attendance);
-    setAttendance(updated);
+    void endBreak(attendanceId, attendance).then(setAttendance).catch((error) => setAppError(error.message));
   };
 
   // Clock Out handler with GPS
   const handleClockOut = (attendanceId: string, geo?: GeoLocationData) => {
-    const updated = clockOut(attendanceId, attendance, geo);
-    setAttendance(updated);
+    void clockOut(attendanceId, attendance, geo).then(setAttendance).catch((error) => setAppError(error.message));
   };
 
   // Submit Leave Request
   const handleSubmitLeave = (request: Omit<LeaveRequest, 'id' | 'appliedAt' | 'status'>) => {
-    const updated = submitLeaveRequest(request, leaveRequests);
-    setLeaveRequests(updated);
+    void submitLeaveRequest(request).then(setLeaveRequests).catch((error) => setAppError(error.message));
   };
 
   // Review Leave Request (Approve or Reject with reason)
@@ -152,72 +173,48 @@ export default function App() {
     decision: 'approved' | 'rejected',
     comment: string
   ) => {
-    const updated = reviewLeaveRequest(
+    void reviewLeaveRequest(
       requestId,
       decision,
-      currentEmployee.id,
-      currentEmployee.name,
-      comment,
-      leaveRequests
-    );
-    setLeaveRequests(updated);
+      currentEmployee!.id,
+      currentEmployee!.name,
+      comment
+    ).then(setLeaveRequests).catch((error) => setAppError(error.message));
   };
 
   // Cancel Leave Request
   const handleCancelLeave = (requestId: string) => {
-    const updated = cancelLeaveRequest(requestId, leaveRequests);
-    setLeaveRequests(updated);
+    void cancelLeaveRequest(requestId).then(setLeaveRequests).catch((error) => setAppError(error.message));
   };
 
-  // Add new employee
-  const handleAddEmployee = (newEmp: Employee) => {
-    const updated = [...employees, newEmp];
-    setEmployees(updated);
-    saveEmployees(updated);
-  };
+  if (isLoading) {
+    return <div className="min-h-screen grid place-items-center bg-slate-50 text-sm text-slate-600">Loading your secure staff portal…</div>;
+  }
 
-  // Reset to initial demo data
-  const handleResetData = () => {
-    resetDemoData();
-    const freshEmps = loadEmployees();
-    setEmployees(freshEmps);
-    setAttendance(loadAttendance());
-    setLeaveRequests(loadLeaveRequests());
-    setCurrentUserId(freshEmps[0].id);
-    setIsAuthenticated(true);
-    setActiveView('manager_dashboard');
-    setSelectedStaffForCalendar(null);
-  };
+  if (!isAuthenticated) {
+    return <><LoginView onLoginSuccess={handleLoginSuccess} />{appError && <div role="alert" className="fixed bottom-4 left-4 right-4 mx-auto max-w-xl rounded-lg bg-rose-100 p-3 text-sm text-rose-800">{appError}</div>}</>;
+  }
 
-  // Today's attendance for current employee
+  if (!currentEmployee) {
+    return <div className="min-h-screen grid place-items-center bg-slate-50 p-6"><div className="max-w-lg rounded-xl bg-white p-6 shadow"><h1 className="font-semibold text-slate-900">Could not load your staff profile</h1><p className="mt-2 text-sm text-slate-600">{appError || 'The signed-in account has no profile in Supabase yet.'} Check that the setup SQL has been run.</p><button onClick={handleLogout} className="mt-4 rounded bg-indigo-600 px-4 py-2 text-sm text-white">Log out</button></div></div>;
+  }
+
+  // Only render staff records after Supabase has authenticated the user and loaded their profile.
   const todayAttendance = getTodayAttendanceForEmployee(currentEmployee.id, attendance);
   const pendingRequestsCount = leaveRequests.filter((r) => r.status === 'pending').length;
-
   const staffLeaveRequests = leaveRequests.filter((r) => r.employeeId === currentEmployee.id);
   const staffAttendance = attendance.filter((a) => a.employeeId === currentEmployee.id);
   const staffMembers = employees.filter((e) => e.role === 'staff');
 
-  // If user is logged out, show LoginView
-  if (!isAuthenticated) {
-    return (
-      <LoginView
-        allEmployees={employees}
-        onLoginSuccess={handleLoginSuccess}
-      />
-    );
-  }
-
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+      {appError && <div role="alert" className="bg-rose-50 border-b border-rose-200 px-4 py-2 text-sm text-rose-800">{appError}<button className="ml-3 underline" onClick={() => setAppError('')}>Dismiss</button></div>}
       {/* Top Header Navigation */}
       <Header
         currentEmployee={currentEmployee}
-        allEmployees={employees}
         pendingRequestsCount={pendingRequestsCount}
         activeView={activeView}
         setActiveView={setActiveView}
-        onSwitchUser={handleSwitchUser}
-        onResetData={handleResetData}
         onRequestLeaveOpen={() => setIsLeaveModalOpen(true)}
         onLogout={handleLogout}
       />
@@ -240,7 +237,7 @@ export default function App() {
           />
         )}
 
-        {/* 2) Dedicated Staff Monthly Calendar (When clicking John Doe or other staff) */}
+        {/* 2) Dedicated Staff Monthly Calendar */}
         {isManager && activeView === 'staff_calendar' && (
           selectedStaffForCalendar ? (
             <StaffMonthlyCalendarView
@@ -334,11 +331,6 @@ export default function App() {
         onSubmit={handleSubmitLeave}
       />
 
-      <AddEmployeeModal
-        isOpen={isAddEmployeeModalOpen}
-        onClose={() => setIsAddEmployeeModalOpen(false)}
-        onAddEmployee={handleAddEmployee}
-      />
     </div>
   );
 }
