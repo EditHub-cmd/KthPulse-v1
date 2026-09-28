@@ -1,333 +1,163 @@
-import { Employee, AttendanceRecord, LeaveRequest, LeaveBalanceSummary, LeaveType } from '../types';
-import { INITIAL_EMPLOYEES, INITIAL_ATTENDANCE, INITIAL_LEAVE_REQUESTS } from '../data/mockData';
+import { AttendanceRecord, Employee, LeaveBalanceSummary, LeaveRequest, LeaveType } from '../types';
+import { supabase } from '../lib/supabase';
 import { getCurrentTimeString, getTodayDateString } from './dateUtils';
 
-const STORAGE_KEYS = {
-  EMPLOYEES: 'staffpulse_employees_v1',
-  ATTENDANCE: 'staffpulse_attendance_v1',
-  LEAVE_REQUESTS: 'staffpulse_leave_requests_v1',
-  CURRENT_USER_ID: 'staffpulse_current_user_v1',
-};
-
-export function loadEmployees(): Employee[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.EMPLOYEES);
-    if (!raw) {
-      saveEmployees(INITIAL_EMPLOYEES);
-      return INITIAL_EMPLOYEES;
-    }
-    return JSON.parse(raw);
-  } catch (e) {
-    console.error('Failed to load employees from localStorage', e);
-    return INITIAL_EMPLOYEES;
-  }
+function throwIfError(error: { message: string } | null): void {
+  if (error) throw new Error(error.message);
 }
 
-export function saveEmployees(employees: Employee[]): void {
-  localStorage.setItem(STORAGE_KEYS.EMPLOYEES, JSON.stringify(employees));
+export async function loadEmployees(): Promise<Employee[]> {
+  const { data, error } = await supabase.from('profiles').select('*').order('name');
+  throwIfError(error);
+  return (data || []).map((row) => ({
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    title: row.title,
+    department: row.department,
+    avatar: row.avatar || '',
+    joinedDate: row.joined_date,
+    locationCountry: row.location_country || undefined,
+    timezone: row.timezone || undefined,
+    managerId: row.manager_id || undefined,
+    offerLetter: row.offer_letter,
+    activeWorkStatus: row.active_work_status || undefined,
+  } as Employee));
 }
 
-export function loadAttendance(): AttendanceRecord[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.ATTENDANCE);
-    if (!raw) {
-      saveAttendance(INITIAL_ATTENDANCE);
-      return INITIAL_ATTENDANCE;
-    }
-    return JSON.parse(raw);
-  } catch (e) {
-    console.error('Failed to load attendance from localStorage', e);
-    return INITIAL_ATTENDANCE;
-  }
+export async function loadAttendance(): Promise<AttendanceRecord[]> {
+  const { data, error } = await supabase.from('attendance').select('*').order('date', { ascending: false });
+  throwIfError(error);
+  return (data || []).map((row) => ({
+    id: row.id,
+    employeeId: row.employee_id,
+    date: row.date,
+    clockInTime: row.clock_in_time,
+    clockOutTime: row.clock_out_time,
+    breaks: row.breaks || [],
+    workLocation: row.work_location,
+    clockInGeo: row.clock_in_geo || undefined,
+    clockOutGeo: row.clock_out_geo || undefined,
+    status: row.status,
+    notes: row.notes || undefined,
+  } as AttendanceRecord));
 }
 
-export function saveAttendance(records: AttendanceRecord[]): void {
-  localStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(records));
+export async function loadLeaveRequests(): Promise<LeaveRequest[]> {
+  const { data, error } = await supabase.from('leave_requests').select('*, profiles(name, department)').order('applied_at', { ascending: false });
+  throwIfError(error);
+  return (data || []).map((row) => ({
+    id: row.id,
+    employeeId: row.employee_id,
+    employeeName: row.profiles?.name || '',
+    employeeDepartment: row.profiles?.department || '',
+    leaveType: row.leave_type,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    isHalfDay: row.is_half_day,
+    halfDayPeriod: row.half_day_period || undefined,
+    totalDays: Number(row.total_days),
+    reason: row.reason,
+    status: row.status,
+    appliedAt: row.applied_at,
+    reviewedBy: row.reviewed_by || undefined,
+    reviewedByName: row.reviewed_by_name || undefined,
+    reviewedAt: row.reviewed_at || undefined,
+    managerComment: row.manager_comment || undefined,
+    supportingDocName: row.supporting_doc_name || undefined,
+  } as LeaveRequest));
 }
 
-export function loadLeaveRequests(): LeaveRequest[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.LEAVE_REQUESTS);
-    if (!raw) {
-      saveLeaveRequests(INITIAL_LEAVE_REQUESTS);
-      return INITIAL_LEAVE_REQUESTS;
-    }
-    return JSON.parse(raw);
-  } catch (e) {
-    console.error('Failed to load leave requests from localStorage', e);
-    return INITIAL_LEAVE_REQUESTS;
-  }
-}
-
-export function saveLeaveRequests(requests: LeaveRequest[]): void {
-  localStorage.setItem(STORAGE_KEYS.LEAVE_REQUESTS, JSON.stringify(requests));
-}
-
-export function getActiveUserId(): string {
-  return localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID) || 'emp_1';
-}
-
-export function setActiveUserId(id: string): void {
-  localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, id);
-}
-
-// Calculate dynamic leave balances for an employee based on their offer letter terms
-export function computeEmployeeLeaveBalances(
-  employee: Employee,
-  leaveRequests: LeaveRequest[]
-): LeaveBalanceSummary[] {
+export function computeEmployeeLeaveBalances(employee: Employee, leaveRequests: LeaveRequest[]): LeaveBalanceSummary[] {
   const empRequests = leaveRequests.filter((r) => r.employeeId === employee.id && r.status !== 'cancelled');
-
-  const getUsage = (type: LeaveType) => {
-    let used = 0;
-    let pending = 0;
-
-    for (const req of empRequests) {
-      if (req.leaveType === type) {
-        if (req.status === 'approved') {
-          used += req.totalDays;
-        } else if (req.status === 'pending') {
-          pending += req.totalDays;
-        }
-      }
-    }
-    return { used, pending };
-  };
-
-  const annualUsage = getUsage('annual');
-  const sickUsage = getUsage('sick');
-  const casualUsage = getUsage('casual');
-  const matPatUsage = getUsage('maternity_paternity');
-
-  return [
-    {
-      leaveType: 'annual',
-      label: 'Annual Leave',
-      entitled: employee.offerLetter.annualLeaveEntitlement,
-      used: annualUsage.used,
-      pending: annualUsage.pending,
-      remaining: Math.max(0, employee.offerLetter.annualLeaveEntitlement - annualUsage.used - annualUsage.pending),
-      description: 'Paid holiday allowance designated in offer letter contract.',
-    },
-    {
-      leaveType: 'sick',
-      label: 'Sick & Medical Leave',
-      entitled: employee.offerLetter.sickLeaveEntitlement,
-      used: sickUsage.used,
-      pending: sickUsage.pending,
-      remaining: Math.max(0, employee.offerLetter.sickLeaveEntitlement - sickUsage.used - sickUsage.pending),
-      description: 'Allowance for medical indisposition and clinic visits with MC.',
-    },
-    {
-      leaveType: 'casual',
-      label: 'Casual / Personal Leave',
-      entitled: employee.offerLetter.casualLeaveEntitlement,
-      used: casualUsage.used,
-      pending: casualUsage.pending,
-      remaining: Math.max(0, employee.offerLetter.casualLeaveEntitlement - casualUsage.used - casualUsage.pending),
-      description: 'Short notice personal time off for family and urgent errands.',
-    },
-    {
-      leaveType: 'maternity_paternity',
-      label: 'Parental Leave',
-      entitled: employee.offerLetter.maternityPaternityEntitlement,
-      used: matPatUsage.used,
-      pending: matPatUsage.pending,
-      remaining: Math.max(0, employee.offerLetter.maternityPaternityEntitlement - matPatUsage.used - matPatUsage.pending),
-      description: 'Contractual parental leave entitlement.',
-    },
+  const getUsage = (type: LeaveType) => empRequests.reduce((sum, req) => {
+    if (req.leaveType !== type) return sum;
+    return { used: sum.used + (req.status === 'approved' ? req.totalDays : 0), pending: sum.pending + (req.status === 'pending' ? req.totalDays : 0) };
+  }, { used: 0, pending: 0 });
+  const types: Array<[LeaveType, string, number, string]> = [
+    ['annual', 'Annual Leave', employee.offerLetter.annualLeaveEntitlement, 'Paid holiday allowance designated in offer letter contract.'],
+    ['sick', 'Sick & Medical Leave', employee.offerLetter.sickLeaveEntitlement, 'Allowance for medical indisposition and clinic visits with MC.'],
+    ['casual', 'Casual / Personal Leave', employee.offerLetter.casualLeaveEntitlement, 'Short notice personal time off for family and urgent errands.'],
+    ['maternity_paternity', 'Parental Leave', employee.offerLetter.maternityPaternityEntitlement, 'Contractual parental leave entitlement.'],
   ];
+  return types.map(([leaveType, label, entitled, description]) => {
+    const { used, pending } = getUsage(leaveType);
+    return { leaveType, label, entitled, used, pending, remaining: Math.max(0, entitled - used - pending), description };
+  });
 }
 
-// Attendance operations
-export function getTodayAttendanceForEmployee(
-  employeeId: string,
-  attendanceList: AttendanceRecord[]
-): AttendanceRecord | undefined {
-  const today = getTodayDateString();
-  return attendanceList.find((a) => a.employeeId === employeeId && a.date === today);
+export function getTodayAttendanceForEmployee(employeeId: string, records: AttendanceRecord[]): AttendanceRecord | undefined {
+  return records.find((record) => record.employeeId === employeeId && record.date === getTodayDateString());
 }
 
-export function clockIn(
-  employeeId: string,
-  location: 'Office HQ' | 'Remote / WFH' | 'Client Site',
-  notes: string,
-  attendanceList: AttendanceRecord[],
-  geo?: import('../types').GeoLocationData
-): AttendanceRecord[] {
-  const today = getTodayDateString();
+export async function clockIn(employeeId: string, location: AttendanceRecord['workLocation'], notes: string, _records: AttendanceRecord[], geo?: AttendanceRecord['clockInGeo']): Promise<AttendanceRecord[]> {
   const time = getCurrentTimeString();
-
-  // Working hour is 10:00 AM sharp. If clock in > 10:00:00 (e.g. 10:01:00), flagged as late in RED!
-  const isLate = time > '10:00:00';
-
-  const newRecord: AttendanceRecord = {
-    id: `att_${Date.now()}`,
-    employeeId,
-    date: today,
-    clockInTime: time,
-    clockOutTime: null,
-    breaks: [],
-    workLocation: location,
-    clockInGeo: geo,
-    status: isLate ? 'late' : 'present',
-    notes: notes || `Clocked in via StaffPulse (${location})`,
-  };
-
-  const updated = [newRecord, ...attendanceList];
-  saveAttendance(updated);
-  return updated;
+  const { error } = await supabase.from('attendance').insert({
+    employee_id: employeeId, date: getTodayDateString(), clock_in_time: time,
+    breaks: [], work_location: location, clock_in_geo: geo || null,
+    status: time > '10:00:00' ? 'late' : 'present', notes: notes || `Clocked in via StaffPulse (${location})`,
+  });
+  throwIfError(error);
+  return loadAttendance();
 }
 
-export function startBreak(
-  attendanceId: string,
-  breakNote: string,
-  attendanceList: AttendanceRecord[]
-): AttendanceRecord[] {
+export async function startBreak(id: string, note: string, records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
+  const row = records.find((record) => record.id === id);
+  if (!row) throw new Error('Attendance record not found.');
+  const breaks = [...row.breaks, { id: crypto.randomUUID(), startTime: getCurrentTimeString(), endTime: null, note: note || 'Rest Break' }];
+  const { error } = await supabase.from('attendance').update({ breaks }).eq('id', id);
+  throwIfError(error);
+  return loadAttendance();
+}
+
+export async function endBreak(id: string, records: AttendanceRecord[]): Promise<AttendanceRecord[]> {
+  const row = records.find((record) => record.id === id);
+  if (!row) throw new Error('Attendance record not found.');
   const time = getCurrentTimeString();
-  const updated = attendanceList.map((rec) => {
-    if (rec.id === attendanceId) {
-      return {
-        ...rec,
-        breaks: [
-          ...rec.breaks,
-          {
-            id: `brk_${Date.now()}`,
-            startTime: time,
-            endTime: null,
-            note: breakNote || 'Rest Break',
-          },
-        ],
-      };
-    }
-    return rec;
-  });
-  saveAttendance(updated);
-  return updated;
+  const breaks = row.breaks.map((item) => item.endTime ? item : { ...item, endTime: time });
+  const { error } = await supabase.from('attendance').update({ breaks }).eq('id', id);
+  throwIfError(error);
+  return loadAttendance();
 }
 
-export function endBreak(
-  attendanceId: string,
-  attendanceList: AttendanceRecord[]
-): AttendanceRecord[] {
+export async function clockOut(id: string, records: AttendanceRecord[], geo?: AttendanceRecord['clockOutGeo']): Promise<AttendanceRecord[]> {
+  const row = records.find((record) => record.id === id);
+  if (!row) throw new Error('Attendance record not found.');
   const time = getCurrentTimeString();
-  const updated = attendanceList.map((rec) => {
-    if (rec.id === attendanceId) {
-      const updatedBreaks = rec.breaks.map((b) => {
-        if (!b.endTime) {
-          return { ...b, endTime: time };
-        }
-        return b;
-      });
-      return { ...rec, breaks: updatedBreaks };
-    }
-    return rec;
+  const breaks = row.breaks.map((item) => item.endTime ? item : { ...item, endTime: time });
+  const { error } = await supabase.from('attendance').update({ clock_out_time: time, clock_out_geo: geo || null, breaks }).eq('id', id);
+  throwIfError(error);
+  return loadAttendance();
+}
+
+export async function submitLeaveRequest(request: Omit<LeaveRequest, 'id' | 'appliedAt' | 'status'>): Promise<LeaveRequest[]> {
+  const { error } = await supabase.from('leave_requests').insert({
+    employee_id: request.employeeId, leave_type: request.leaveType, start_date: request.startDate,
+    end_date: request.endDate, is_half_day: request.isHalfDay, half_day_period: request.halfDayPeriod || null,
+    total_days: request.totalDays, reason: request.reason, supporting_doc_name: request.supportingDocName || null,
   });
-  saveAttendance(updated);
-  return updated;
+  throwIfError(error);
+  return loadLeaveRequests();
 }
 
-export function clockOut(
-  attendanceId: string,
-  attendanceList: AttendanceRecord[],
-  geo?: import('../types').GeoLocationData
-): AttendanceRecord[] {
-  const time = getCurrentTimeString();
-  const updated = attendanceList.map((rec) => {
-    if (rec.id === attendanceId) {
-      // Also close any open break
-      const updatedBreaks = rec.breaks.map((b) => {
-        if (!b.endTime) {
-          return { ...b, endTime: time };
-        }
-        return b;
-      });
-      return {
-        ...rec,
-        clockOutTime: time,
-        clockOutGeo: geo,
-        breaks: updatedBreaks,
-      };
-    }
-    return rec;
-  });
-  saveAttendance(updated);
-  return updated;
+export async function reviewLeaveRequest(id: string, decision: 'approved' | 'rejected', managerId: string, managerName: string, comment: string): Promise<LeaveRequest[]> {
+  const { error } = await supabase.from('leave_requests').update({
+    status: decision, reviewed_by: managerId, reviewed_by_name: managerName,
+    reviewed_at: new Date().toISOString(), manager_comment: comment || (decision === 'approved' ? 'Approved by supervisor' : 'Rejected by supervisor'),
+  }).eq('id', id);
+  throwIfError(error);
+  return loadLeaveRequests();
 }
 
-export function submitLeaveRequest(
-  request: Omit<LeaveRequest, 'id' | 'appliedAt' | 'status'>,
-  requestsList: LeaveRequest[]
-): LeaveRequest[] {
-  const newReq: LeaveRequest = {
-    ...request,
-    id: `req_${Date.now()}`,
-    status: 'pending',
-    appliedAt: new Date().toISOString(),
-  };
-
-  const updated = [newReq, ...requestsList];
-  saveLeaveRequests(updated);
-  return updated;
+export async function cancelLeaveRequest(id: string): Promise<LeaveRequest[]> {
+  const { error } = await supabase.from('leave_requests').update({ status: 'cancelled' }).eq('id', id).eq('status', 'pending');
+  throwIfError(error);
+  return loadLeaveRequests();
 }
 
-export function reviewLeaveRequest(
-  requestId: string,
-  decision: 'approved' | 'rejected',
-  managerId: string,
-  managerName: string,
-  managerComment: string,
-  requestsList: LeaveRequest[]
-): LeaveRequest[] {
-  const updated = requestsList.map((req) => {
-    if (req.id === requestId) {
-      return {
-        ...req,
-        status: decision,
-        reviewedBy: managerId,
-        reviewedByName: managerName,
-        reviewedAt: new Date().toISOString(),
-        managerComment: managerComment || (decision === 'approved' ? 'Approved by supervisor' : 'Rejected by supervisor'),
-      };
-    }
-    return req;
-  });
-  saveLeaveRequests(updated);
-  return updated;
-}
-
-export function cancelLeaveRequest(
-  requestId: string,
-  requestsList: LeaveRequest[]
-): LeaveRequest[] {
-  const updated = requestsList.map((req) => {
-    if (req.id === requestId) {
-      return { ...req, status: 'cancelled' as const };
-    }
-    return req;
-  });
-  saveLeaveRequests(updated);
-  return updated;
-}
-
-export function updateOfferLetterContract(
-  employeeId: string,
-  newOfferLetter: Employee['offerLetter'],
-  employeeList: Employee[]
-): Employee[] {
-  const updated = employeeList.map((emp) => {
-    if (emp.id === employeeId) {
-      return { ...emp, offerLetter: newOfferLetter };
-    }
-    return emp;
-  });
-  saveEmployees(updated);
-  return updated;
-}
-
-export function resetDemoData(): void {
-  localStorage.removeItem(STORAGE_KEYS.EMPLOYEES);
-  localStorage.removeItem(STORAGE_KEYS.ATTENDANCE);
-  localStorage.removeItem(STORAGE_KEYS.LEAVE_REQUESTS);
-  localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
+export async function updateOfferLetterContract(id: string, offerLetter: Employee['offerLetter']): Promise<Employee[]> {
+  const { error } = await supabase.from('profiles').update({ offer_letter: offerLetter }).eq('id', id);
+  throwIfError(error);
+  return loadEmployees();
 }
